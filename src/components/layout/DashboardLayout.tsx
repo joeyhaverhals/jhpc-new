@@ -1,27 +1,22 @@
-import React from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
+import React, { useState } from 'react';
+import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
 
 const DashboardLayout: React.FC = () => {
-  const { user, isLoading } = useAuth();
-
-  if (isLoading) {
-    return <div>Loading...</div>;
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="flex h-screen bg-gray-100">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 p-6">
-          <Outlet />
+    <div className="min-h-screen bg-gray-100">
+      <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
+      
+      <div className="lg:pl-64 flex flex-col flex-1">
+        <Header onMenuClick={() => setSidebarOpen(true)} />
+        
+        <main className="flex-1 py-6">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

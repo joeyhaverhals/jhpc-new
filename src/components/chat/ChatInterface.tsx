@@ -1,204 +1,197 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/hooks/useAuth';
 import { useAIChatStore } from '@/stores/aiChatStore';
-import { Send, Loader, AlertCircle } from 'lucide-react';
+import { Send, X, Loader, AlertTriangle, MinusCircle } from 'lucide-react';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  timestamp: string;
+  timestamp: Date;
 }
 
 const ChatInterface: React.FC = () => {
-  const { user } = useAuth();
-  const { config, error } = useAIChatStore();
+  const [isOpen, setIsOpen] = useState(false);
+  const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isMinimized, setIsMinimized] = useState(false);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const { user } = useAuth();
+  const { config, createSession, sendMessage } = useAIChatStore();
 
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const isAllowed = () => {
-    if (!config || !user) return false;
-    
-    // Check status
-    if (config.status !== 'active') return false;
-
-    // Check role access
-    if (!config.allowedRoles.includes(user.role)) return false;
-
-    // Check user allowlist
-    if (config.allowedUsers.length > 0 && !config.allowedUsers.includes(user.id)) {
-      return false;
-    }
-
-    // Check time restrictions
-    if (config.timeRestrictions.enabled) {
-      const now = new Date();
-      const currentHour = now.getHours();
-      const currentMinute = now.getMinutes();
-      const currentTime = `${currentHour}:${currentMinute}`;
-      const currentDay = now.getDay();
-
-      if (!config.timeRestrictions.daysOfWeek.includes(currentDay)) return false;
-
-      if (config.timeRestrictions.startTime && config.timeRestrictions.endTime) {
-        if (currentTime < config.timeRestrictions.startTime || 
-            currentTime > config.timeRestrictions.endTime) {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || !isAllowed()) return;
+  const handleSend = async () => {
+    if (!message.trim() || isLoading) return;
 
     const newMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: input.trim(),
-      timestamp: new Date().toISOString(),
+      content: message,
+      timestamp: new Date(),
     };
 
     setMessages(prev => [...prev, newMessage]);
-    setInput('');
+    setMessage('');
     setIsLoading(true);
+    setError(null);
 
     try {
-      let response;
-      if (config?.provider === 'gpt4') {
-        response = await fetch(config.apiConfig.endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.apiConfig.apiKey}`,
-          },
-          body: JSON.stringify({
-            messages: [...messages, newMessage].map(m => ({
-              role: m.role,
-              content: m.content,
-            })),
-            max_tokens: config.apiConfig.maxTokens,
-            temperature: config.apiConfig.temperature,
-          }),
-        });
-      } else {
-        // Local LLM via webhook
-        response = await fetch(config.apiConfig.webhookUrl!, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: input.trim(),
-            history: messages,
-          }),
-        });
-      }
-
-      const data = await response.json();
-      
-      const assistantMessage: Message = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: data.message || data.choices[0].message.content,
-        timestamp: new Date().toISOString(),
-      };
-
-      setMessages(prev => [...prev, assistantMessage]);
-    } catch (error) {
-      console.error('Error:', error);
+      const response = await sendMessage(message);
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
-        role: 'system',
-        content: 'Sorry, there was an error processing your message.',
-        timestamp: new Date().toISOString(),
+        role: 'assistant',
+        content: response,
+        timestamp: new Date(),
       }]);
+    } catch (err) {
+      setError('Failed to get response. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (!isAllowed()) {
-    return (
-      <div className="flex items-center justify-center h-64 bg-gray-50 rounded-lg">
-        <div className="text-center">
-          <AlertCircle className="mx-auto h-12 w-12 text-gray-400" />
-          <p className="mt-2 text-sm text-gray-500">
-            {config?.status === 'maintenance' 
-              ? config.maintenanceMessage || 'Chat is currently under maintenance.'
-              : 'Chat is not available at this time.'}
-          </p>
-        </div>
-      </div>
-    );
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  if (!config || !user || !config.allowedRoles.includes(user.role)) {
+    return null;
+  }
+
+  const isTimeAllowed = () => {
+    if (!config.timeRestrictions.enabled) return true;
+    
+    const now = new Date();
+    const currentDay = now.getDay();
+    const currentTime = now.toLocaleTimeString('en-US', { hour12: false });
+    
+    return config.timeRestrictions.daysOfWeek.includes(currentDay) &&
+           (!config.timeRestrictions.startTime || currentTime >= config.timeRestrictions.startTime) &&
+           (!config.timeRestrictions.endTime || currentTime <= config.timeRestrictions.endTime);
+  };
+
+  if (!isTimeAllowed()) {
+    return null;
   }
 
   return (
-    <div className="flex flex-col h-[600px] bg-white rounded-lg shadow">
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${
-              message.role === 'user' ? 'justify-end' : 'justify-start'
-            }`}
-          >
-            <div
-              className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                message.role === 'user'
-                  ? 'bg-indigo-600 text-white'
-                  : message.role === 'system'
-                  ? 'bg-red-100 text-red-900'
-                  : 'bg-gray-100 text-gray-900'
-              }`}
-            >
-              <p className="text-sm">{message.content}</p>
-              <p className="text-xs opacity-75 mt-1">
-                {new Date(message.timestamp).toLocaleTimeString()}
-              </p>
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 20 }}
+          className={`fixed bottom-24 right-8 w-96 ${
+            isMinimized ? 'h-14' : 'h-[600px]'
+          } bg-white/10 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/20 overflow-hidden`}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between p-4 border-b border-white/10">
+            <h3 className="text-lg font-medium text-white">AI Assistant</h3>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setIsMinimized(!isMinimized)}
+                className="p-1 hover:bg-white/10 rounded-full transition-colors"
+              >
+                <MinusCircle className="h-5 w-5 text-white/60" />
+              </button>
+              <button
+                onClick={() => setIsOpen(false)}
+                className="p-1 hover:bg-white/10 rounded-full transition-colors"
+              >
+                <X className="h-5 w-5 text-white/60" />
+              </button>
             </div>
           </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
 
-      <form onSubmit={handleSubmit} className="p-4 border-t">
-        <div className="flex space-x-4">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            disabled={isLoading}
-            className="flex-1 rounded-lg border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-            placeholder="Type your message..."
-          />
-          <button
-            type="submit"
-            disabled={isLoading || !input.trim()}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {isLoading ? (
-              <Loader className="h-5 w-5 animate-spin" />
-            ) : (
-              <Send className="h-5 w-5" />
-            )}
-          </button>
-        </div>
-      </form>
-    </div>
+          {!isMinimized && (
+            <>
+              {/* Messages */}
+              <div className="flex-1 p-4 space-y-4 overflow-y-auto h-[calc(100%-8rem)]">
+                {messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`flex ${
+                      msg.role === 'user' ? 'justify-end' : 'justify-start'
+                    }`}
+                  >
+                    <div
+                      className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                        msg.role === 'user'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-white/10 text-white'
+                      }`}
+                    >
+                      <p className="text-sm">{msg.content}</p>
+                      <p className="text-xs opacity-60 mt-1">
+                        {msg.timestamp.toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                {isLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-white/10 rounded-lg px-4 py-2">
+                      <Loader className="h-5 w-5 text-white animate-spin" />
+                    </div>
+                  </div>
+                )}
+                {error && (
+                  <div className="flex justify-center">
+                    <div className="bg-red-500/20 rounded-lg px-4 py-2 flex items-center">
+                      <AlertTriangle className="h-5 w-5 text-red-400 mr-2" />
+                      <p className="text-sm text-red-400">{error}</p>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Input */}
+              <div className="p-4 border-t border-white/10">
+                <div className="flex items-center space-x-2">
+                  <textarea
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Type your message..."
+                    className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                    rows={1}
+                  />
+                  <button
+                    onClick={handleSend}
+                    disabled={isLoading || !message.trim()}
+                    className="p-2 bg-indigo-600 rounded-lg text-white disabled:opacity-50 hover:bg-indigo-700 transition-colors"
+                  >
+                    <Send className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </motion.div>
+      )}
+
+      {/* Chat Button */}
+      <motion.button
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => setIsOpen(!isOpen)}
+        className="fixed bottom-8 right-8 p-4 bg-indigo-600 rounded-full text-white shadow-lg hover:bg-indigo-700 transition-colors"
+      >
+        <Send className="h-6 w-6" />
+      </motion.button>
+    </AnimatePresence>
   );
 };
 

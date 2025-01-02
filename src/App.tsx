@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import Login from '@/pages/auth/Login';
+import Website from '@/pages/Website';
 
 // Admin Pages
 import Dashboard from '@/pages/admin/Dashboard';
@@ -18,7 +19,7 @@ import Users from '@/pages/admin/Users';
 import About from '@/pages/admin/About';
 
 const App: React.FC = () => {
-  const { isLoading } = useAuth();
+  const { isLoading, error } = useAuth();
 
   if (isLoading) {
     return (
@@ -28,10 +29,24 @@ const App: React.FC = () => {
     );
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="bg-red-50 p-4 rounded-md">
+          <p className="text-red-700">Error: {error}</p>
+          <p className="text-sm text-red-500 mt-2">
+            Please check your environment variables and Supabase configuration.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <BrowserRouter>
       <Routes>
         {/* Public Routes */}
+        <Route path="/" element={<Website />} />
         <Route path="/login" element={<Login />} />
 
         {/* Protected Admin Routes */}
@@ -56,11 +71,8 @@ const App: React.FC = () => {
           <Route path="about" element={<About />} />
         </Route>
 
-        {/* Redirect root to admin dashboard */}
-        <Route path="/" element={<Navigate to="/admin" replace />} />
-
         {/* 404 - Catch all */}
-        <Route path="*" element={<Navigate to="/admin" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );
